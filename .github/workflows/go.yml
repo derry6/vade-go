@@ -30,7 +30,7 @@ jobs:
         mkdir -p ./source/client/sql
         wget -O ./source/client/sql/apolloportaldb.sql ${APOLLO_URL}/apolloportaldb.sql
         wget -O ./source/client/sql/apolloconfigdb.sql ${APOLLO_URL}/apolloconfigdb.sql
-        ./docker-compose -f ./source/client/docker-compose-test.yaml
+        ./docker-compose -f ./source/client/docker-compose-test.yaml up
 
     - name: Test
       run: go test -v ./..
