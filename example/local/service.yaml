@@ -1,0 +1,4 @@
+vade:
+  service:
+    name: fileConfig
+    app: example

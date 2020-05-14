@@ -1,0 +1,7 @@
+vade:
+  logging:
+    level: debug
+    encoding: json
+---
+time:
+  now: 1234309-3
