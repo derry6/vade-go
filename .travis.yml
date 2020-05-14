@@ -19,9 +19,7 @@ before_install:
   - curl -L ${DOCKER_COMPOSE_URL}/docker-compose-`uname -s`-`uname -m` > docker-compose
   - chmod +x docker-compose
   - sudo mv docker-compose /usr/local/bin
-  - mkdir -p ./source/client/sql
-  - wget -O ./source/client/sql/apolloportaldb.sql ${APOLLO_URL}/apolloportaldb.sql
-  - wget -O ./source/client/sql/apolloconfigdb.sql ${APOLLO_URL}/apolloconfigdb.sql
+  - wget -O custom.properties https://raw.githubusercontent.com/nacos-group/nacos-docker/master/example/init.d/custom.properties
 
 before_script:
   - docker-compose -f ./source/client/docker-compose-test.yaml up

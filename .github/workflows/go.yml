@@ -24,13 +24,16 @@ jobs:
 
     - name: Get dependencies
       run: |
-        export APOLLO_URL="https://raw.githubusercontent.com/ctripcorp/apollo/master/scripts/docker-quick-start/sql"
-        curl -L https://github.com/docker/compose/releases/download/1.24.1/docker-compose-`uname -s`-`uname -m` > docker-compose
+        go get -v -t -d ./...
+        if [ -f Gopkg.toml ]; then
+           curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+           dep ensure
+        fi
+        sudo rm /usr/local/bin/docker-compose
+        curl -L https://github.com/docker/compose/releases/download/1.25.5/docker-compose-`uname -s`-`uname -m` > docker-compose
         chmod +x docker-compose
-        mkdir -p ./source/client/sql
-        wget -O ./source/client/sql/apolloportaldb.sql ${APOLLO_URL}/apolloportaldb.sql
-        wget -O ./source/client/sql/apolloconfigdb.sql ${APOLLO_URL}/apolloconfigdb.sql
-        ./docker-compose -f ./source/client/docker-compose-test.yaml up -d
+        sudo mv docker-compose /usr/local/bin
+        docker-compose -f ./test-data/docker-compose.yaml up -d
 
     - name: Test
-      run: go test -v ./..
+      run: go test -v ./...
