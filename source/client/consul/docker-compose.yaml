@@ -7,20 +7,6 @@ services:
     container_name: consul_demo_server_0
     environment:
       - CONSUL_BIND_INTERFACE=eth0
-    command: agent -server -bootstrap-expect=3 -ui -node=consul_demo_server_0 -client=0.0.0.0 -datacenter=consul-shenzhen
-
-  consul_demo_server_1:
-    image: consul
-    restart: always
-    container_name: consul_demo_server_1
-    environment:
-      - CONSUL_BIND_INTERFACE=eth0
-    command: agent -server -bootstrap-expect=3 -ui -node=consul_demo_server_1 -client=0.0.0.0 -datacenter=consul-shenzhen -join=consul_demo_server_0
-
-  consul_demo_server_2:
-    image: consul
-    restart: always
-    container_name: consul_demo_server_2
-    environment:
-      - CONSUL_BIND_INTERFACE=eth0
-    command: agent -server -bootstrap-expect=3 -ui -node=consul_demo_server_2 -client=0.0.0.0 -datacenter=consul-shenzhen -join=consul_demo_server_0
+    ports:
+    - 8500:8500
+    command: agent -server -bootstrap-expect=1 -ui -node=consul_demo_server_0 -client=0.0.0.0 -datacenter=consul-shenzhen

@@ -1,0 +1,30 @@
+language: go
+
+go:
+  - 1.12.x
+  - 1.13.x
+
+env:
+  global:
+    - DOCKER_COMPOSE_URL=https://github.com/docker/compose/releases/download/1.24.1
+    - APOLLO_URL=https://raw.githubusercontent.com/ctripcorp/apollo/master/scripts/docker-quick-start/sql/
+services:
+  - docker
+
+git:
+  depth: 1
+
+before_install:
+  - sudo rm /usr/local/bin/docker-compose
+  - curl -L ${DOCKER_COMPOSE_URL}/docker-compose-`uname -s`-`uname -m` > docker-compose
+  - chmod +x docker-compose
+  - sudo mv docker-compose /usr/local/bin
+  - mkdir -p ./source/client/sql
+  - wget -O ./source/client/sql/apolloportaldb.sql ${APOLLO_URL}/apolloportaldb.sql
+  - wget -O ./source/client/sql/apolloconfigdb.sql ${APOLLO_URL}/apolloconfigdb.sql
+
+before_script:
+  - docker-compose -f ./source/client/docker-compose-test.yaml up
+
+script:
+  - go test ./...

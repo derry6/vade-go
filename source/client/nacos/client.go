@@ -19,13 +19,16 @@ import (
     "github.com/derry6/vade-go/source/client"
 )
 
+const (
+    Name = "nacos"
+)
 
 var (
     _ client.Client = (*Client)(nil)
 )
 
 func init() {
-    _ = client.RegisterClient("nacos", NewClient)
+    _ = client.RegisterClient(Name, NewClient)
 }
 
 type Client struct {

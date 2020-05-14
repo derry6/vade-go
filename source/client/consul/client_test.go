@@ -32,7 +32,7 @@ func buildAbsolutePath(serviceName, fileName string) string {
 
 func createTestClient() (client.Client, error) {
     return NewClient(&client.Config{
-        Address:    "172.22.0.4:8500",
+        Address:    "127.0.0.1:8500",
         DataCenter: "consul-shenzhen",
     })
 }

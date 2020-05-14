@@ -16,8 +16,7 @@ import (
 )
 
 const (
-    SourceName      = "consul"
-    DefaultPriority = client.DefaultRemotePriority
+    Name = "consul"
 )
 
 var (
@@ -34,7 +33,7 @@ type Client struct {
 }
 
 func (c *Client) Close() error { return nil }
-func (c *Client) Name() string { return SourceName }
+func (c *Client) Name() string { return Name }
 
 func (c *Client) Pull(ctx context.Context, path string) (data []byte, err error) {
     opts := &consulapi.QueryOptions{Datacenter: c.dataCenter}

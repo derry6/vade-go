@@ -12,13 +12,11 @@ import (
     "github.com/pkg/errors"
 
     "github.com/derry6/vade-go/pkg/log"
-    "github.com/derry6/vade-go/source"
     "github.com/derry6/vade-go/source/client"
 )
 
 const (
-    SourceName      = "apollo"
-    DefaultPriority = client.DefaultRemotePriority
+    Name = "apollo"
 )
 
 const (
@@ -37,7 +35,7 @@ var (
 )
 
 func init() {
-    _ = client.RegisterClient(SourceName, NewClient)
+    _ = client.RegisterClient(Name, NewClient)
 }
 
 // appId@cluster
@@ -57,7 +55,7 @@ type Client struct {
 }
 
 func (c *Client) Close() error { return nil }
-func (c *Client) Name() string { return SourceName }
+func (c *Client) Name() string { return Name }
 func (c *Client) Pull(ctx context.Context, path string) ([]byte, error) {
     p := newPath(path, c.cluster, c.appId)
     return c.pull(p, true)

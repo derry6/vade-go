@@ -43,7 +43,7 @@ func newFakeClient(opts *client.Config) (c client.Client, err error) {
 func newFakeSource(t *testing.T, opts ...Option) Source {
     _ = client.RegisterClient("fake", newFakeClient)
     c, _ := client.New("fake", nil)
-    return New(c)
+    return New("fake", c, opts...)
 }
 
 func TestSourceNew(t *testing.T) {
