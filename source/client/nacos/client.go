@@ -96,12 +96,6 @@ func (c *Client) md5(data string) (md5sum string) {
 
 func (c *Client) handleUpdated(namespace, group, dataId, data string) {
     p := nPath{group: group, namespace: namespace, dataId: dataId}
-    if p.namespace == "" {
-        p.namespace = defaultNamespace
-    }
-    if p.group == "" {
-        p.group = defaultGroup
-    }
     c.mutex.Lock()
     cb, _ := c.callbacks[p.String()]
     c.mutex.Unlock()
@@ -120,7 +114,7 @@ func NewClient(cfg *client.Config) (client.Client, error) {
     cConfigs := getClientConfig(cfg)
 
     namespaceId := cfg.Namespace
-    if namespaceId != "public" {
+    if namespaceId != defaultNamespace {
         cConfigs.NamespaceId = namespaceId
     }
     group := cfg.Group

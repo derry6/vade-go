@@ -50,16 +50,11 @@ type manager struct {
     mutex          sync.RWMutex
 }
 
-func (m *manager) setOptions(opts *options) {
-    m.expander = expander.New(m.unsafeGet, opts.epOpts...)
-    m.expandDisabled = opts.epDisabled
-}
+func (mgr *manager) AddSource(newSrc source.Source) (err error) {
+    mgr.mutex.Lock()
+    defer mgr.mutex.Unlock()
 
-func (m *manager) AddSource(newSrc source.Source) (err error) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-
-    for _, p := range m.sources {
+    for _, p := range mgr.sources {
         if p == newSrc {
             return
         }
@@ -69,49 +64,49 @@ func (m *manager) AddSource(newSrc source.Source) (err error) {
     }
     keys := newSrc.Keys()
     for _, k := range keys {
-        px, ok := m.ksMap[k]
+        px, ok := mgr.ksMap[k]
         if ok { // 优先级较高
             if newSrc.Priority() > px.Priority() {
-                m.ksMap[k] = newSrc
+                mgr.ksMap[k] = newSrc
             }
         } else {
-            m.ksMap[k] = newSrc
+            mgr.ksMap[k] = newSrc
         }
     }
 
     newSrc.OnEvents(func(events []*source.Event) {
-        m.handleSourceEvents(newSrc, events)
+        mgr.handleSourceEvents(newSrc, events)
     })
 
-    sources := append(m.sources, newSrc)
+    sources := append(mgr.sources, newSrc)
     sort.Sort(sourceLess(sources))
-    m.sources = sources
+    mgr.sources = sources
     return nil
 }
 
-func (m *manager) Source(name string) (source.Source, error) {
-    m.mutex.RLock()
-    defer m.mutex.RUnlock()
-    for _, s := range m.sources {
+func (mgr *manager) Source(name string) (source.Source, error) {
+    mgr.mutex.RLock()
+    defer mgr.mutex.RUnlock()
+    for _, s := range mgr.sources {
         if s.Name() == name {
             return s, nil
         }
     }
     return nil, pkgerrs.New("source not found")
 }
-func (m *manager) Sources() (sources []source.Source) {
-    m.mutex.RLock()
-    defer m.mutex.RUnlock()
-    for _, s := range m.sources {
+func (mgr *manager) Sources() (sources []source.Source) {
+    mgr.mutex.RLock()
+    defer mgr.mutex.RUnlock()
+    for _, s := range mgr.sources {
         sources = append(sources, s)
     }
     return sources
 }
 
-func (m *manager)  AddPath(sourceName string, path string, opts ...source.PathOption) error {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    for _, s := range m.sources {
+func (mgr *manager)  AddPath(sourceName string, path string, opts ...source.PathOption) error {
+    mgr.mutex.Lock()
+    defer mgr.mutex.Unlock()
+    for _, s := range mgr.sources {
         if s.Name() == sourceName {
             return s.AddPath(path, opts...)
         }
@@ -119,25 +114,25 @@ func (m *manager)  AddPath(sourceName string, path string, opts ...source.PathOp
     return nil
 }
 
-func (m *manager) unsafeGet(key string) (val interface{}, ok bool) {
-    if val, ok = m.overrides[key]; ok {
+func (mgr *manager) unsafeGet(key string) (val interface{}, ok bool) {
+    if val, ok = mgr.overrides[key]; ok {
         return val, ok
     }
-    s, ok := m.ksMap[key]
+    s, ok := mgr.ksMap[key]
     if ok {
         return s.Get(key)
     }
-    val, ok = m.defaults[key]
+    val, ok = mgr.defaults[key]
     return
 }
 
-func (m *manager) Get(key string) (val interface{}, ok bool) {
-    m.mutex.RLock()
-    defer m.mutex.RUnlock()
-    if m.expandDisabled {
-        return m.unsafeGet(key)
+func (mgr *manager) Get(key string) (val interface{}, ok bool) {
+    mgr.mutex.RLock()
+    defer mgr.mutex.RUnlock()
+    if mgr.expandDisabled {
+        return mgr.unsafeGet(key)
     }
-    v, err := m.expander.Expand(key)
+    v, err := mgr.expander.Expand(key)
     if err != nil {
         log.Get().Errorf("Can't expand key %q : %v", key, err)
         return nil, false
@@ -145,40 +140,40 @@ func (m *manager) Get(key string) (val interface{}, ok bool) {
     return v, true
 }
 
-func (m *manager) All() (values map[string]interface{}) {
+func (mgr *manager) All() (values map[string]interface{}) {
     values = map[string]interface{}{}
-    m.mutex.RLock()
-    defer m.mutex.RUnlock()
+    mgr.mutex.RLock()
+    defer mgr.mutex.RUnlock()
 
     // defaults
-    for k, v := range m.defaults {
+    for k, v := range mgr.defaults {
         values[k] = v
     }
-    sources := m.sources
+    sources := mgr.sources
     for i := len(sources) - 1; i >= 0; i-- {
         for k, v := range sources[i].All() {
             values[k] = v
         }
     }
     // overrides
-    for k, v := range m.overrides {
+    for k, v := range mgr.overrides {
         values[k] = v
     }
     return values
 }
 
-func (m *manager) Keys() (keys []string) {
-    m.mutex.RLock()
-    defer m.mutex.RUnlock()
+func (mgr *manager) Keys() (keys []string) {
+    mgr.mutex.RLock()
+    defer mgr.mutex.RUnlock()
     // 过滤重复Key
     keysMap := map[string]bool{}
-    for k := range m.defaults {
+    for k := range mgr.defaults {
         keysMap[k] = true
     }
-    for k := range m.ksMap {
+    for k := range mgr.ksMap {
         keysMap[k] = true
     }
-    for k := range m.overrides {
+    for k := range mgr.overrides {
         keysMap[k] = true
     }
     for k := range keysMap {
@@ -187,34 +182,34 @@ func (m *manager) Keys() (keys []string) {
     return keys
 }
 
-func (m *manager) Set(key string, value interface{}) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    m.overrides[key] = value
+func (mgr *manager) Set(key string, value interface{}) {
+    mgr.mutex.Lock()
+    defer mgr.mutex.Unlock()
+    mgr.overrides[key] = value
 }
-func (m *manager) Delete(key string) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    delete(m.overrides, key)
-    delete(m.defaults, key)
-}
-
-func (m *manager) SetDefault(key string, value interface{}) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    m.defaults[key] = value
+func (mgr *manager) Delete(key string) {
+    mgr.mutex.Lock()
+    defer mgr.mutex.Unlock()
+    delete(mgr.overrides, key)
+    delete(mgr.defaults, key)
 }
 
-func (m *manager) Watch(pattern string, cb EventHandler) (watchId int64) {
-    return m.dispatcher.Watch(pattern, cb)
+func (mgr *manager) SetDefault(key string, value interface{}) {
+    mgr.mutex.Lock()
+    defer mgr.mutex.Unlock()
+    mgr.defaults[key] = value
 }
-func (m *manager) Unwatch(watchId int64) {
-    m.dispatcher.Unwatch(watchId)
+
+func (mgr *manager) Watch(pattern string, cb EventHandler) (watchId int64) {
+    return mgr.dispatcher.Watch(pattern, cb)
+}
+func (mgr *manager) Unwatch(watchId int64) {
+    mgr.dispatcher.Unwatch(watchId)
 }
 
 // 是否在高优先级的 source 中存在该key
-func (m *manager) inHigherSource(key string, src source.Source) bool {
-    for _, p := range m.sources {
+func (mgr *manager) inHigherSource(key string, src source.Source) bool {
+    for _, p := range mgr.sources {
         if p == src || p.Priority() < src.Priority() {
             continue
         }
@@ -227,8 +222,8 @@ func (m *manager) inHigherSource(key string, src source.Source) bool {
 }
 
 // 找到低优先级的 source
-func (m *manager) lowerSource(src source.Source, key string) (source.Source, interface{}) {
-    for _, p := range m.sources {
+func (mgr *manager) lowerSource(src source.Source, key string) (source.Source, interface{}) {
+    for _, p := range mgr.sources {
         if p == src || p.Priority() > src.Priority() {
             continue
         }
@@ -239,11 +234,11 @@ func (m *manager) lowerSource(src source.Source, key string) (source.Source, int
     return nil, nil
 }
 
-func (m *manager) handleDeletedEvent(src source.Source, ev *source.Event) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
+func (mgr *manager) handleDeletedEvent(src source.Source, ev *source.Event) {
+    mgr.mutex.Lock()
+    defer mgr.mutex.Unlock()
 
-    if lastSrc, ok := m.ksMap[ev.Key]; ok {
+    if lastSrc, ok := mgr.ksMap[ev.Key]; ok {
         if lastSrc != src {
             // 低优先级的source发生的事件, h忽略
             if lastSrc.Priority() > src.Priority() {
@@ -251,22 +246,22 @@ func (m *manager) handleDeletedEvent(src source.Source, ev *source.Event) {
             }
         }
         // 找到低优先级的source
-        lowerSrc, v := m.lowerSource(src, ev.Key)
+        lowerSrc, v := mgr.lowerSource(src, ev.Key)
         if lowerSrc == nil {
-            delete(m.ksMap, ev.Key)
+            delete(mgr.ksMap, ev.Key)
         } else {
             ev.ValueTo = v
             ev.Action = Updated
-            m.ksMap[ev.Key] = lowerSrc
+            mgr.ksMap[ev.Key] = lowerSrc
         }
     }
 }
-func (m *manager) handleUpdatedEvent(src source.Source, ev *source.Event) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    lastSrc, ok := m.ksMap[ev.Key]
+func (mgr *manager) handleUpdatedEvent(src source.Source, ev *source.Event) {
+    mgr.mutex.Lock()
+    defer mgr.mutex.Unlock()
+    lastSrc, ok := mgr.ksMap[ev.Key]
     if !ok {
-        m.ksMap[ev.Key] = src
+        mgr.ksMap[ev.Key] = src
         return
     }
     if lastSrc == src {
@@ -283,30 +278,31 @@ func (m *manager) handleUpdatedEvent(src source.Source, ev *source.Event) {
     v, ok2 := lastSrc.Get(ev.Key)
     if !ok2 {
         // should never reach here
-        m.ksMap[ev.Key] = src
+        mgr.ksMap[ev.Key] = src
         ev.Action = Created
         ev.ValueFrom = nil
     } else {
         ev.Action = Updated
         ev.ValueFrom = v
     }
-    m.ksMap[ev.Key] = src
+    mgr.ksMap[ev.Key] = src
 }
 
-func (m *manager) handleSourceEvents(src source.Source, events []*source.Event) {
+func (mgr *manager) handleSourceEvents(src source.Source, events []*source.Event) {
     for _, ev := range events {
         if ev.Action == Created || ev.Action == Updated {
-            m.handleUpdatedEvent(src, ev)
-            m.dispatcher.Dispatch(ev)
+            mgr.handleUpdatedEvent(src, ev)
+            mgr.dispatcher.Dispatch(ev)
         } else if ev.Action == Deleted {
-            m.handleDeletedEvent(src, ev)
-            m.dispatcher.Dispatch(ev)
+            mgr.handleDeletedEvent(src, ev)
+            mgr.dispatcher.Dispatch(ev)
         }
     }
 }
 
-func newManager() *manager {
-    m := &manager{
+func newManager(opts ...Option) (Manager, error) {
+    vOpts := newOptions(opts...)
+    mgr := &manager{
         sources:    make([]source.Source, 0),
         ksMap:      make(map[string]source.Source),
         overrides:  make(map[string]interface{}),
@@ -314,6 +310,8 @@ func newManager() *manager {
         dispatcher: newDispatcher(),
         mutex:      sync.RWMutex{},
     }
-    m.expander = expander.New(m.unsafeGet)
-    return m
+    if err := mgr.init(vOpts); err != nil {
+        return nil, err
+    }
+    return mgr, nil
 }

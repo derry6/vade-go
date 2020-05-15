@@ -2,79 +2,78 @@ package nacos_test
 
 import (
     "context"
+    "fmt"
+    "math/rand"
+    "os"
     "testing"
     "time"
+
+    "github.com/google/uuid"
+    "github.com/stretchr/testify/assert"
 
     "github.com/derry6/vade-go/source/client"
     "github.com/derry6/vade-go/source/client/nacos"
 )
 
-func newNacosClient(t *testing.T, addr string) client.Client {
+var (
+    testServerAddress = "localhost:8848"
+    testLogDir        = "/tmp/nacos_client_test_log"
+    testTimeout       = time.Second
+    testPullPath      = "test-pull.yaml"
+    testWatchPath     = "test-watch.yaml"
+)
+
+func init() {
+    rand.Seed(time.Now().UnixNano())
+}
+
+func cleanUp(c client.Client) {
+    _ = os.RemoveAll("/tmp/nacos_client_test_log")
+    _ = c.Close()
+}
+
+func newTestClient() (client.Client, error) {
     cfg := client.DefaultConfig()
-    cfg.Address = "localhost:8848"
-    cfg.Timeout = time.Second
-    cli, err := client.New(nacos.Name, cfg)
-    if err != nil{
-        t.Fatalf("Can not create nacos client: %v", err)
-    }
-    return cli
+    cfg.Address = testServerAddress
+    cfg.Timeout = testTimeout
+    cfg.LogDir = testLogDir
+    return client.New(nacos.Name, cfg)
 }
 
-func watchNacosPath(t *testing.T, path string, rsp chan []byte) error {
-    cli := newNacosClient(t, "localhost:8848")
-    go func() {
-        defer cli.Close()
-        if err := cli.Watch(path, func(data []byte) {
-            rsp <- data
-        }); err != nil {
-            t.Fatalf("Can not watch nacos path: %v", err)
-        }
-    }()
-    return nil
+func TestClient_Pull(t *testing.T) {
+    cli, err := newTestClient()
+    assert.NoError(t, err)
+    defer cleanUp(cli)
+    testData := uuid.New().String()
+    err = cli.Push(context.TODO(), testPullPath, []byte(testData))
+    assert.NoError(t, err)
+    time.Sleep(500 * time.Millisecond)
+    getData, err := cli.Pull(context.TODO(), testPullPath)
+    assert.NoError(t, err)
+    assert.Equal(t, testData, string(getData))
 }
 
-func TestNacosClientPushPull(t *testing.T) {
-    cli := newNacosClient(t, "localhost:8848")
-    defer cli.Close()
-    testData := []byte("a: 100")
-    err := cli.Push(context.TODO(), "test.yaml", testData)
-    if err != nil {
-        t.Fatalf("Can not push content to nacos: %v", err)
-    }
-    data, err := cli.Pull(context.TODO(), "test.yaml")
-    if err != nil {
-        t.Fatalf("Can not pull content from nacos: %v", err)
-    }
-    if string(data) != string(testData) {
-        t.Fatalf("nacos data is %q: want %q", string(data), string(testData))
-    }
-}
+func TestClient_Watch(t *testing.T) {
+    watchData := fmt.Sprintf("test_watch: %s", uuid.New().String())
+    cli, err := newTestClient()
+    assert.NoError(t, err)
+    defer cleanUp(cli)
+    events := make(chan []byte, 1)
+    // create dataId
+    err = cli.Push(context.TODO(), testWatchPath, []byte(watchData))
+    assert.NoError(t, err)
 
-func TestNacosClientWatch(t *testing.T) {
-    var (
-        testData = "test_b: 100"
-        testPath = "test-watch.yaml"
-    )
-    cli := newNacosClient(t, "localhost:8848")
-    defer cli.Close()
-    err := cli.Push(context.TODO(), testPath, []byte("test_a: 10"))
-    if err != nil {
-        t.Fatalf("Can not push content to nacos: %v", err)
-    }
-    rsp := make(chan []byte)
-    defer close(rsp)
-
-    _ = watchNacosPath(t, testPath, rsp)
-    err =cli.Push(context.TODO(), testPath, []byte(testData))
-    if err != nil {
-        t.Fatalf("Can not push content to nacos: %v", err)
-    }
+    time.Sleep(time.Second)
+    // watch dataId
+    err = cli.Watch(testWatchPath, func(data []byte) {
+        // fmt.Printf("Nacos config %q changed: %s\n", testWatchPath, data)
+        events <- data
+    })
+    assert.NoError(t, err)
     select {
-    case <-time.After(100*time.Millisecond):
-        t.Fatalf("Watch nacos path timeout")
-        case data := <-rsp:
-            if string(data) != testData {
-                t.Fatalf("Nacos path changed: %q, want %q", string(data), testData)
-            }
+    case <-time.After(5 * time.Second):
+        assert.FailNow(t, "Watch timeout")
+    case data := <-events:
+        assert.Equal(t, watchData, string(data))
     }
 }

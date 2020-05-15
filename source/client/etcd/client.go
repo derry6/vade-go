@@ -6,9 +6,9 @@ import (
     "sync"
     "time"
 
-    etcdv3 "github.com/coreos/etcd/clientv3"
     "github.com/coreos/etcd/mvcc/mvccpb"
     pkgerrs "github.com/pkg/errors"
+    etcdv3 "go.etcd.io/etcd/clientv3"
 
     "github.com/derry6/vade-go/source/client"
 )

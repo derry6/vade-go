@@ -17,7 +17,7 @@ type Snapshot struct {
     mutex   sync.RWMutex
 }
 
-func (c *Snapshot) get(p *aPath) (data []byte, err error) {
+func (c *Snapshot) get(p *configPath) (data []byte, err error) {
     if c.disable {
         return nil, pkgerrs.New("snapshot disabled") // disabled
     }
@@ -31,9 +31,9 @@ func (c *Snapshot) get(p *aPath) (data []byte, err error) {
     return data, nil
 }
 
-func (c *Snapshot) getReleaseKey(p *aPath) (key string, nId int64, err error) {
+func (c *Snapshot) getReleaseKey(p *configPath) (key string, nId int64) {
     if c.disable {
-        return "", 0, pkgerrs.New("snapshot disabled")
+        return
     }
     c.mutex.RLock()
     data, err := ioutil.ReadFile(fmt.Sprintf("%s.release", c.file(p)))
@@ -41,11 +41,11 @@ func (c *Snapshot) getReleaseKey(p *aPath) (key string, nId int64, err error) {
     if err != nil {
         return
     }
-    _, err = fmt.Sscanf(string(data), "%s:%d", &key, &nId)
+    _, _ = fmt.Sscanf(string(data), "%s:%d", &key, &nId)
     return
 }
 
-func (c *Snapshot) save(p *aPath, release string, nId int64, data []byte) error {
+func (c *Snapshot) save(p *configPath, release string, nId int64, data []byte) error {
     if c.disable {
         return pkgerrs.New("snapshot disabled")
     }
@@ -70,7 +70,7 @@ func (c *Snapshot) save(p *aPath, release string, nId int64, data []byte) error 
     return err
 }
 
-func (c *Snapshot) delete(p *aPath) error {
+func (c *Snapshot) delete(p *configPath) error {
     if c.disable {
         return pkgerrs.New("snapshot disabled")
     }
@@ -92,7 +92,7 @@ func (c Snapshot) clean() (err error) {
     return err
 }
 
-func (c *Snapshot) file(p *aPath) string {
+func (c *Snapshot) file(p *configPath) string {
     fileName := p.namespace + "@" + p.cluster + "@" + p.appId
     return filepath.Join(c.dir, "apollo", "config", fileName)
 }

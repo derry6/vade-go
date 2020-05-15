@@ -484,5 +484,5 @@ func unmarshal(get UnmarshalGet, keys []string, out interface{}, opts ...Unmarsh
 }
 
 func Unmarshal(out interface{}, opts ...UnmarshalOption) error {
-    return unmarshal(mgr.Get, mgr.Keys(), out, opts...)
+    return unmarshal(_mgr.Get, _mgr.Keys(), out, opts...)
 }

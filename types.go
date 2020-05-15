@@ -61,7 +61,7 @@ func MustFloat(key string) float64 {
     return 0.0
 }
 
-// String 获取 string 值
+// fullKey 获取 string 值
 func String(key string, def string) string {
     if v, ok := Get(key); ok {
         if x, err := cast.ToStringE(v); err == nil {

@@ -3,16 +3,16 @@ package apollo
 import (
     "net/url"
     "path"
-    "strings"
 )
 
-type aPath struct {
+type configPath struct {
     namespace string // namespace
     appId     string
     cluster   string //
+    token     string
 }
 
-func (p *aPath) Ext() string {
+func (p *configPath) extension() string {
     ext := path.Ext(p.namespace)
     if len(ext) > 0 {
         return ext[1:]
@@ -20,33 +20,34 @@ func (p *aPath) Ext() string {
     return "properties"
 }
 
-func (p *aPath) String() string {
-    b := strings.Builder{}
-    b.WriteString(p.namespace)
-    b.WriteString("?")
-    b.WriteString("appId=")
-    b.WriteString(p.appId)
-    b.WriteString("&cluster=")
-    b.WriteString(p.cluster)
-    return b.String()
+func (p *configPath) fullKey() string {
+    return p.namespace + "@" + p.appId + "@" + p.cluster
 }
 
-func (p *aPath) watchID() string {
+func (p *configPath) watchKey() string {
     return p.cluster + "@" + p.appId
 }
 
-func newPath(path, defaultCluster, defaultApp string) *aPath {
+func buildConfigPath(path, cluster, appId, token string) *configPath {
     u, err := url.Parse(path)
     if err != nil {
         return nil
     }
     q := u.Query()
-    p := &aPath{namespace: u.Path, appId: q.Get("appId"), cluster: q.Get("cluster")}
+    p := &configPath{
+        namespace: u.Path,
+        appId:     q.Get("appId"),
+        cluster:   q.Get("cluster"),
+        token:     q.Get("token"),
+    }
     if p.cluster == "" {
-        p.cluster = defaultCluster
+        p.cluster = cluster
     }
     if p.appId == "" {
-        p.appId = defaultApp
+        p.appId = appId
+    }
+    if p.token == "" {
+        p.token = token
     }
     return p
 }

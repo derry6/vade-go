@@ -13,7 +13,15 @@ type nPath struct {
 }
 
 func (p *nPath) String() string {
-    return fmt.Sprintf("%s@%s@%s", p.dataId, p.group, p.namespace)
+    ns := defaultNamespace
+    if p.namespace != "" {
+        ns = p.namespace
+    }
+    grp := defaultGroup
+    if p.group != "" {
+        grp = p.group
+    }
+    return fmt.Sprintf("%s@%s@%s", p.dataId, grp, ns)
 }
 
 func (p *nPath) Ext() string {
@@ -33,6 +41,8 @@ func newPath(path string, defaultGroup, defaultNamespace string) *nPath {
     p := &nPath{dataId: u.Path, group: defaultGroup, namespace: defaultNamespace}
     if group := q.Get("group"); group != "" {
         p.group = group
+    } else {
+        p.group = defaultGroup
     }
     if ns := q.Get("namespace"); ns != "" {
         p.namespace = ns

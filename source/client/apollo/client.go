@@ -2,7 +2,7 @@ package apollo
 
 import (
     "context"
-    "encoding/json"
+    "fmt"
     "net/http"
     "net/url"
     "strings"
@@ -20,14 +20,14 @@ const (
 )
 
 const (
-    watchURL    = "%s/notifications/v2?appId=%s&cluster=%s&notifications=%s"
-    cacheURL    = "%s/configfiles/json/%s/%s/%s"
-    nonCacheURL = "%s/configs/%s/%s/%s"
+    watchURLFmt = "%s/notifications/v2"
+    getURLFmt   = "%s/configs/%s/%s/%s"
+    defaultHost = "http://localhost:8080"
 )
 
 var (
-    ErrNotFound    = errors.New("not found")
-    ErrNotModified = errors.New("not modified")
+    errNotFound    = errors.New("not found")
+    errNotModified = errors.New("not modified")
 )
 
 var (
@@ -40,42 +40,80 @@ func init() {
 
 // appId@cluster
 type Client struct {
-    appId           string
-    cluster         string
-    timeout  time.Duration
-    httpc    *httpClient
-    selector Selector
-    snapshot *Snapshot
-    mutex    sync.RWMutex
-    notificationIDs map[string]int64                  // namespace@cluster@app -> id
-    releaseKeys     map[string]string                 // namespace@cluster@app -> id
-    watches         map[string][]string               // cluster@app -> namespaces
-    callbacks       map[string]client.ChangedCallback // namespace@cluster@app -> callbacks
-    watchDisabled   bool
+    appId         string
+    cluster       string
+    token         string
+    timeout       time.Duration
+    cli           *httpClient
+    selector      Selector
+    snapshot      *Snapshot
+    mutex         sync.RWMutex
+    nIDs          map[string]int64                  // namespace@cluster@app -> id
+    releases      map[string]string                 // namespace@cluster@app -> id
+    callbacks     map[string]client.ChangedCallback // namespace@cluster@app -> callbacks
+    watches       map[string][]string               // cluster@app -> namespaces
+    watchDisabled bool
 }
 
 func (c *Client) Close() error { return nil }
-func (c *Client) Name() string { return Name }
+
+func (c *Client) setRelease(fullKey string, release string, nId int64) {
+    c.mutex.Lock()
+    if release != "" {
+        c.releases[fullKey] = release
+    }
+    if nId != 0 {
+        c.nIDs[fullKey] = nId
+    }
+    c.mutex.Unlock()
+}
+func (c *Client) lastReleaseOf(fullKey string) (release string) {
+    c.mutex.RLock()
+    release, _ = c.releases[fullKey]
+    c.mutex.RUnlock()
+    return release
+}
+
 func (c *Client) Pull(ctx context.Context, path string) ([]byte, error) {
-    p := newPath(path, c.cluster, c.appId)
-    return c.pull(p, true)
+    var (
+        release string
+        data    []byte
+        err     error
+        nId     int64
+    )
+    p := buildConfigPath(path, c.cluster, c.appId, c.token)
+    fullKey := p.fullKey()
+    release, data, err = c.getConfig(p, "")
+    if err != nil {
+        log.Get().Warnf("Can not load apollo config for %q: %v", fullKey, err)
+        serverErr := err
+        if data, err = c.snapshot.get(p); err != nil {
+            return nil, serverErr
+        }
+        release, nId = c.snapshot.getReleaseKey(p)
+        c.setRelease(fullKey, release, nId)
+        return data, nil
+    }
+    c.setRelease(fullKey, release, 0)
+    return data, err
 }
 
 func (c *Client) Push(ctx context.Context, path string, data []byte) error {
-    return nil
+    return errors.New("not implement yet")
 }
 
 func (c *Client) Watch(path string, cb client.ChangedCallback) error {
-    p := newPath(path, c.cluster, c.appId)
-
+    p := buildConfigPath(path, c.cluster, c.appId, c.token)
     c.mutex.Lock()
     defer c.mutex.Unlock()
     if c.watchDisabled {
         return errors.New("watch disabled")
     }
-    c.callbacks[p.String()] = cb
+    c.callbacks[p.fullKey()] = cb
     found := false
-    namespaces, ok := c.watches[p.watchID()]
+
+    watchKey := p.watchKey()
+    namespaces, ok := c.watches[watchKey]
     if ok {
         for _, namespace := range namespaces {
             if namespace == p.namespace {
@@ -86,7 +124,7 @@ func (c *Client) Watch(path string, cb client.ChangedCallback) error {
     }
     if !found {
         namespaces = append(namespaces, p.namespace)
-        c.watches[p.watchID()] = namespaces
+        c.watches[watchKey] = namespaces
     }
     if !ok {
         go c.listen(p)
@@ -94,195 +132,77 @@ func (c *Client) Watch(path string, cb client.ChangedCallback) error {
     return nil
 }
 
-func (c *Client) pull(p *aPath, cached bool) (data []byte, err error) {
-    // 从服务端拉取配置
-    if cached {
-        if data, err = c.snapshot.get(p); err == nil {
-            releaseKey, nId, e2 := c.snapshot.getReleaseKey(p)
-            if e2 == nil {
-                c.mutex.Lock()
-                c.releaseKeys[p.String()] = releaseKey
-                c.notificationIDs[p.String()] = nId
-                c.mutex.Unlock()
-            }
-            err = e2
-            return
-        }
-    }
-    _, data, err = c.pullServer(p, cached)
-    return data, err
-}
-
-// fetch data from apollo server
-func (c *Client) doHttpGet(p *aPath, releaseKey string, cached bool) (code int, body []byte, err error) {
+// get config from apollo server
+func (c *Client) getConfig(p *configPath, release string) (newRelease string, content []byte, err error) {
     var (
         values = url.Values{}
         req    *http.Request
+        result *httpResult
     )
     appId := url.QueryEscape(p.appId)
     cluster := url.QueryEscape(p.cluster)
     ns := url.QueryEscape(p.namespace)
 
-    values.Set("releaseKey", releaseKey)
+    values.Set("releaseKey", release)
     server := c.selector.Select()
     ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
     defer cancel()
 
-    if cached {
-        req, err = c.httpc.NewRequest(http.MethodGet, cacheURL, values, server, appId, cluster, ns)
-    } else {
-        req, err = c.httpc.NewRequest(http.MethodGet, nonCacheURL, values, server, appId, cluster, ns)
-    }
+    reqURL := fmt.Sprintf(getURLFmt, server, appId, cluster, ns)
+    req, err = c.cli.NewRequest(http.MethodGet, reqURL, values)
     if err != nil {
         return
     }
-    result, err := c.httpc.Raw(ctx, req)
+    sign(req, p.appId, p.token)
+
+    result, err = c.cli.Raw(ctx, req)
     if err != nil {
-        return 0, nil, err
+        return "", nil, err
     }
-    return result.Code, result.Body, err
-}
-func (c *Client) pullServer(p *aPath, cached bool) (rKey string, data []byte, err error) {
-    var (
-        code int
-        body []byte
-    )
-    c.mutex.RLock()
-    rKeyID := p.String()
-    rKey = c.releaseKeys[rKeyID]
-    c.mutex.RUnlock()
-    if code, body, err = c.doHttpGet(p, rKey, cached); err != nil {
-        return
-    }
-    switch code {
+    switch result.Code {
     case http.StatusNotFound:
-        return rKey, nil, ErrNotFound
+        return release, nil, errNotFound
     case http.StatusOK:
         break
     case http.StatusNotModified:
-        return rKey, nil, ErrNotModified
+        return release, nil, errNotModified
     default:
-        return rKey, nil, errors.Errorf("status code is %d", code)
+        return release, nil, errors.Errorf("status code is %d", result.Code)
     }
-    if cached {
-        body, err = c.parseCachedRsp(p, body)
-    } else {
-        rKey, body, err = c.parseRsp(p, body)
-        if err != nil && rKey != "" {
-            c.mutex.Lock()
-            c.releaseKeys[rKeyID] = rKey
-            c.mutex.Unlock()
-        }
-    }
-    return rKey, body, err
-}
-func (c *Client) loadNew(p *aPath, lastKey string, nId int64) (data []byte, err error) {
-    var newKey string
-    newKey, data, err = c.pullServer(p, false)
+    newRelease, content, err = c.parseResponse(p, result.Body)
     if err != nil {
-        log.Get().Errorf("Can't load apollo %q configs: %v", p, err.Error())
+        return "", nil, err
+    }
+    return newRelease, content, err
+}
+
+func (c *Client) onConfigChanged(p *configPath, nId int64) {
+    fullKey := p.fullKey()
+    lastKey := c.lastReleaseOf(fullKey)
+    newKey, content, err := c.getConfig(p, lastKey)
+    if err != nil {
+        log.Get().Errorf("Can not load apollo configs for %q: %v", fullKey, err)
         return
     }
+    c.setRelease(fullKey, newKey, nId)
     if newKey != lastKey {
-        _ = c.snapshot.save(p, newKey, nId, data)
-    }
-    return
-}
-
-func (c *Client) handleUpdated(p *aPath, lastKey string, nId int64) {
-    data, err := c.loadNew(p, lastKey, nId)
-    if err != nil {
-        return
+        _ = c.snapshot.save(p, newKey, nId, content)
     }
     c.mutex.RLock()
-    cb, ok := c.callbacks[p.String()]
+    cb, _ := c.callbacks[fullKey]
     c.mutex.RUnlock()
-    if ok && cb != nil {
-        cb(data)
+    if cb != nil {
+        cb(content)
     }
 }
 
-// watch
-func (c *Client) buildListenData(p *aPath, namespaces []string) string {
-    type N struct {
-        Namespace string `json:"namespaceName,omitempty"`
-        ID        int64  `json:"notificationId,omitempty"`
-    }
-    var v []*N
-    c.mutex.RLock()
-    for _, ns := range namespaces {
-        p.namespace = ns
-        id, _ := c.notificationIDs[p.String()]
-        v = append(v, &N{Namespace: ns, ID: id})
-    }
-    c.mutex.RUnlock()
-    data, _ := json.Marshal(v)
-    return string(data)
-}
-func (c *Client) listen(p *aPath) {
-    type notification struct {
-        Name string `json:"namespaceName,omitempty"`
-        ID   int64  `json:"notificationId,omitempty"`
-    }
-    timeout := c.timeout * 10
-    for {
-        var namespaces []string
-        c.mutex.RLock()
-        namespaces, _ = c.watches[p.watchID()]
-        c.mutex.RUnlock()
-
-        if len(namespaces) == 0 {
-            time.Sleep(timeout)
-            continue
-        }
-        param := c.buildListenData(p, namespaces)
-        var changes []notification
-
-        server := c.selector.Select()
-        args := []interface{}{
-            server,
-            url.QueryEscape(p.appId),
-            url.QueryEscape(p.cluster),
-            url.QueryEscape(param)}
-
-        ctx, cancel := context.WithTimeout(context.Background(), timeout)
-        result, err := c.httpc.Get(ctx, watchURL, nil, &changes, args...)
-        if err != nil {
-            if ctx.Err() != context.DeadlineExceeded {
-                time.Sleep(timeout)
-            }
-            cancel()
-            continue
-        }
-        cancel()
-        switch result.Code {
-        case http.StatusNotModified:
-            continue
-        case http.StatusOK:
-        default:
-            time.Sleep(timeout)
-            continue
-        }
-        for _, n := range changes {
-            p.namespace = n.Name
-            var lastKey string
-            c.mutex.Lock()
-            profileId := p.String()
-            lastKey = c.releaseKeys[profileId]
-            c.notificationIDs[profileId] = n.ID
-            c.mutex.Unlock()
-            c.handleUpdated(p, lastKey, n.ID)
-        }
-    }
-}
-
-func NewClient(cfg *client.Config) (c client.Client, err error) {
+func validateConfig(cfg *client.Config) (addresses []string, err error) {
     if cfg.Address == "" {
         return nil, errors.New("missing server info")
     }
-    addrs := strings.Split(cfg.Address, ";")
-    if len(addrs) == 0 {
-        addrs = append(addrs, "httpc://127.0.0.1:8080")
+    addresses = strings.Split(cfg.Address, ";")
+    if len(addresses) == 0 {
+        addresses = append(addresses, defaultHost)
     }
     if cfg.AppID == "" {
         return nil, errors.New("missing appId")
@@ -293,17 +213,26 @@ func NewClient(cfg *client.Config) (c client.Client, err error) {
     if cfg.Timeout == 0 {
         cfg.Timeout = time.Second
     }
+    return addresses, nil
+}
+
+func NewClient(cfg *client.Config) (client.Client, error) {
+    addrs, err := validateConfig(cfg)
+    if err != nil {
+        return nil, err
+    }
     return &Client{
-        appId:           cfg.AppID,
-        cluster:         cfg.Cluster,
-        timeout:         cfg.Timeout,
-        selector:        NewRandom(addrs),
-        snapshot:        newSnapshot(cfg.CacheDir),
-        notificationIDs: make(map[string]int64),
-        releaseKeys:     make(map[string]string),
-        httpc:           newHttpClient(10*cfg.Timeout, nil),
-        watches:         map[string][]string{},
-        callbacks:       map[string]client.ChangedCallback{},
-        watchDisabled:   cfg.WatchDisabled,
+        appId:         cfg.AppID,
+        cluster:       cfg.Cluster,
+        timeout:       cfg.Timeout,
+        token:         cfg.Token,
+        selector:      NewRandom(addrs),
+        snapshot:      newSnapshot(cfg.CacheDir),
+        nIDs:          make(map[string]int64),
+        releases:      make(map[string]string),
+        cli:           newHttpClient(),
+        watches:       map[string][]string{},
+        callbacks:     map[string]client.ChangedCallback{},
+        watchDisabled: cfg.WatchDisabled,
     }, nil
 }

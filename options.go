@@ -4,6 +4,7 @@ import (
     "github.com/derry6/vade-go/pkg/expander"
     "github.com/derry6/vade-go/pkg/log"
     "github.com/derry6/vade-go/source"
+    "github.com/derry6/vade-go/source/client"
 )
 
 const (
@@ -13,7 +14,28 @@ const (
     DefaultRemotePriority = 9
 )
 
+var (
+    defaultFileOpts = []source.Option {
+        source.WithPriority(DefaultFilePriority),
+    }
+    defaultEnvOpts = []source.Option {
+        source.WithPriority(DefaultEnvPriority),
+    }
+    defaultFlagOpts = []source.Option {
+        source.WithPriority(DefaultFlagPriority),
+    }
+    defaultRemoteOpts = []source.Option {
+        source.WithPriority(DefaultRemotePriority),
+    }
+)
+
 type Option func(opts *options)
+
+type remoteConfig struct {
+    name   string
+    config *client.Config
+    opts   []source.Option
+}
 
 type options struct {
     // fileSource options
@@ -27,6 +49,9 @@ type options struct {
     // flagSource options
     withFlag bool
     flagOpts []source.Option
+
+    // remote Source
+    remotes map[string]remoteConfig
     // logger
     logger log.Logger
     // expansion
@@ -40,54 +65,35 @@ func WithLogger(logger log.Logger) Option {
     }
 }
 
-func WithFileSource(requires, optionals []string) Option {
+func WithFileSource(requires, optionals []string, sOpts ...source.Option) Option {
     return func(opts *options) {
         opts.withFile = true
         opts.requireds = requires
         opts.optionals = optionals
-    }
-}
-func WithFileSourcePrefix(prefix string) Option {
-    return func(opts *options) {
-        opts.fileOpts = append(opts.fileOpts, source.WithPrefix(prefix))
-    }
-}
-func WithFileSourcePriority(pri int) Option {
-    return func(opts *options) {
-        opts.fileOpts = append(opts.fileOpts, source.WithPriority(pri))
+        opts.fileOpts = append(defaultFileOpts, sOpts...)
     }
 }
 
 func WithEnvSource(sOpts ...source.Option) Option {
     return func(opts *options) {
         opts.withEnv = true
-        opts.envOpts = sOpts
+        opts.envOpts = append(defaultEnvOpts, sOpts...)
     }
 }
-func WithEnvSourcePrefix(prefix string) Option {
+func WithFlagSource(sOpts ...source.Option) Option {
     return func(opts *options) {
-        opts.envOpts = append(opts.envOpts, source.WithPrefix(prefix))
-    }
-}
-func WithEnvSourcePriority(pri int) Option {
-    return func(opts *options) {
-        opts.envOpts = append(opts.envOpts, source.WithPriority(pri))
+        opts.withFlag = true
+        opts.flagOpts = append(defaultFlagOpts, sOpts...)
     }
 }
 
-func WithFlagSource() Option {
+func WithRemoteSource(name string, config *client.Config, sOpts ...source.Option) Option {
     return func(opts *options) {
-        opts.withFlag = true
-    }
-}
-func WithFlagSourcePrefix(prefix string) Option {
-    return func(opts *options) {
-        opts.flagOpts = append(opts.flagOpts, source.WithPrefix(prefix))
-    }
-}
-func WithFlagSourcePriority(pri int) Option {
-    return func(opts *options) {
-        opts.flagOpts = append(opts.flagOpts, source.WithPriority(pri))
+        opts.remotes[name] = remoteConfig{
+            name:   name,
+            config: config,
+            opts:   append(defaultRemoteOpts, sOpts...),
+        }
     }
 }
 
@@ -107,9 +113,7 @@ func WithExpansion(pre, post string, cb expander.Handler) Option {
 
 func newOptions(opts ...Option) *options {
     mOpts := &options{
-        fileOpts: []source.Option{source.WithPriority(DefaultFilePriority)},
-        envOpts:  []source.Option{source.WithPriority(DefaultEnvPriority)},
-        flagOpts: []source.Option{source.WithPriority(DefaultFlagPriority)},
+        remotes:  make(map[string]remoteConfig),
     }
     for _, o := range opts {
         o(mOpts)

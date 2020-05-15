@@ -15,13 +15,13 @@ type response struct {
     ReleaseKey string          `json:"releaseKey"`
 }
 
-func (c *Client) parseRsp(p *aPath, raw []byte) (releaseKey string, data []byte, err error) {
+func (c *Client) parseResponse(p *configPath, raw []byte) (releaseKey string, data []byte, err error) {
     var rsp response
     if err = json.Unmarshal(raw, &rsp); err != nil {
         return "", nil, err
     }
     releaseKey = rsp.ReleaseKey
-    switch p.Ext() {
+    switch p.extension() {
     case "yaml", "yml", "json":
         raw = rsp.Configs
     default:
@@ -42,8 +42,8 @@ func (c *Client) parseRsp(p *aPath, raw []byte) (releaseKey string, data []byte,
     return releaseKey, []byte(s), nil
 }
 
-func (c *Client) parseCachedRsp(p *aPath, raw []byte) (data []byte, err error) {
-    switch p.Ext() {
+func (c *Client) parseCachedRsp(p *configPath, raw []byte) (data []byte, err error) {
+    switch p.extension() {
     case "yaml", "yml", "json":
     default:
         return raw, err
