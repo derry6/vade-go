@@ -1,47 +1,37 @@
 package parser
 
 import (
-    "bytes"
-    "io"
+	"bytes"
+	"io"
 
-    "gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v2"
 
-    "github.com/derry6/vade-go/pkg/flatter"
+	"github.com/derry6/vade-go/pkg/flatter"
 )
 
 type yamlParser struct {
 }
 
 func (p *yamlParser) Parse(data []byte, prefix string) (values map[string]interface{}, err error) {
-    raw := make(map[string]interface{})
-    d := yaml.NewDecoder(bytes.NewReader(data))
-
-    n := 0
-    for {
-        var part map[string]interface{}
-        if n == 0 {
-            part = raw
-        } else {
-            part = make(map[string]interface{})
-        }
-        if err = d.Decode(part); err != nil {
-            if err != io.EOF {
-                return
-            }
-            err = nil
-            break
-        } else if n > 0 {
-            for k, v := range part {
-                raw[k] = v
-            }
-        }
-        n++
-    }
-    values = make(map[string]interface{})
-    err = flatter.Flatten(raw, values, prefix, false)
-    return
+	var (
+		raw     map[string]interface{}
+		decoder = yaml.NewDecoder(bytes.NewReader(data))
+	)
+	values = make(map[string]interface{})
+	for {
+		raw = make(map[string]interface{})
+		if err = decoder.Decode(raw); err != nil {
+			if err == io.EOF {
+				return values, nil
+			}
+			return nil, err
+		}
+		if err = flatter.Flatten(raw, values, prefix, false); err != nil {
+			return nil, err
+		}
+	}
 }
 
 func NewYAML() Parser {
-    return &yamlParser{}
+	return &yamlParser{}
 }

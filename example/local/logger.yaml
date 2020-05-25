@@ -1,7 +1,12 @@
 vade:
   logging:
-    level: debug
-    encoding: json
+    level: debuga
+    encoding: jsaccff
 ---
-time:
-  now: 1234309-3
+vade:
+  logging:
+    test: cfqfaa
+---
+vade:
+  logging:
+    test2: kookc
